@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bar Galilei - I Miei Ordini</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lucide-static@0.344.0/font/lucide.min.css">
+</head>
+<body class="bg-slate-50">
+    <header class="bg-white p-4 shadow-sm sticky top-0 z-10">
+        <div class="max-w-2xl mx-auto flex items-center justify-between">
+            <div class="flex items-center gap-4">
+                <a href="/menu.html" class="p-2 text-slate-600"><i class="lucide-arrow-left"></i></a>
+                <h1 class="text-xl font-bold text-slate-800">I Miei Ordini</h1>
+            </div>
+            <button onclick="logout()" class="p-2 text-slate-600"><i class="lucide-log-out"></i></button>
+        </div>
+    </header>
+
+    <main class="max-w-2xl mx-auto p-4 space-y-4" id="ordersList">
+        <!-- Orders will be loaded here -->
+    </main>
+
+    <!-- QR Modal -->
+    <div id="qrModal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-3xl p-8 max-w-xs w-full text-center">
+            <h3 class="text-xl font-bold mb-4">Mostra al Bar</h3>
+            <img id="qrImage" class="w-full aspect-square mb-4" src="" alt="QR Code">
+            <p id="qrCodeText" class="text-2xl font-black text-orange-600 mb-6"></p>
+            <button onclick="closeQR()" class="w-full bg-slate-100 py-3 rounded-xl font-bold text-slate-600">Chiudi</button>
+        </div>
+    </div>
+
+    <script>
+        async function logout() {
+            if (confirm('Sei sicuro di voler uscire?')) {
+                await fetch('/api/auth/logout', { method: 'POST' });
+                window.location.href = '/';
+            }
+        }
+
+        async function loadOrders() {
+            const res = await fetch('/api/orders/my-orders');
+            const orders = await res.json();
+            
+            const list = document.getElementById('ordersList');
+            if (orders.length === 0) {
+                list.innerHTML = '<p class="text-center text-slate-500 py-12">Non hai ancora effettuato ordini.</p>';
+                return;
+            }
+
+            list.innerHTML = orders.map(o => `
+                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                    <div class="flex justify-between items-start mb-4">
+                        <div>
+                            <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Codice</p>
+                            <p class="text-2xl font-black text-orange-600">${o.order_code}</p>
+                        </div>
+                        <div class="text-right">
+                            <span class="px-3 py-1 rounded-full text-xs font-bold uppercase ${getStatusClass(o.status)}">
+                                ${o.status.replace('_', ' ')}
+                            </span>
+                            <p class="text-sm text-slate-500 mt-1">${o.display_time}</p>
+                        </div>
+                    </div>
+                    
+                    <div class="py-3 space-y-1">
+                        ${o.items.map(item => `
+                            <div class="flex justify-between text-sm">
+                                <span class="text-slate-600">${item.quantity}x ${item.name}</span>
+                                <span class="text-slate-400">€ ${(item.price_at_order * item.quantity).toFixed(2)}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+
+                    <div class="flex justify-between items-center pt-4 border-t border-slate-50">
+                        <p class="font-bold text-slate-800">€ ${o.total_price.toFixed(2)}</p>
+                        <button onclick="showQR('${o.order_code}')" class="bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">
+                            <i class="lucide-qr-code w-4 h-4"></i> QR Code
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function getStatusClass(status) {
+            switch(status) {
+                case 'in_attesa': return 'bg-slate-100 text-slate-600';
+                case 'in_preparazione': return 'bg-blue-100 text-blue-600';
+                case 'pronto': return 'bg-green-100 text-green-600 ring-2 ring-green-500';
+                case 'consegnato': return 'bg-slate-200 text-slate-400';
+                default: return 'bg-slate-100 text-slate-600';
+            }
+        }
+
+        async function showQR(code) {
+            const res = await fetch(`/api/qr/${code}`);
+            const data = await res.json();
+            document.getElementById('qrImage').src = data.url;
+            document.getElementById('qrCodeText').innerText = code;
+            document.getElementById('qrModal').classList.remove('hidden');
+        }
+
+        function closeQR() {
+            document.getElementById('qrModal').classList.add('hidden');
+        }
+
+        loadOrders();
+    </script>
+</body>
+</html>

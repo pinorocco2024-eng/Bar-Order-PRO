@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bar Galilei - Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lucide-static@0.344.0/font/lucide.min.css">
+</head>
+<body class="bg-slate-100">
+    <header class="bg-slate-900 text-white p-4 sticky top-0 z-10">
+        <div class="max-w-4xl mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold">Pannello Barista</h1>
+            <div class="flex items-center gap-4">
+                <span id="wsStatus" class="w-3 h-3 rounded-full bg-red-500"></span>
+                <button onclick="logout()" class="text-slate-400 hover:text-white"><i class="lucide-log-out"></i></button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-4xl mx-auto p-4">
+        <div class="bg-white p-4 rounded-2xl shadow-sm mb-6 flex flex-wrap gap-4 items-end">
+            <div class="flex-1 min-w-[200px]">
+                <label class="block text-xs font-bold text-slate-400 uppercase mb-1">Stato</label>
+                <select id="filterStatus" onchange="loadOrders()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 outline-none">
+                    <option value="">Tutti gli stati</option>
+                    <option value="in_attesa">In Attesa</option>
+                    <option value="in_preparazione">In Preparazione</option>
+                    <option value="pronto">Pronto</option>
+                    <option value="consegnato">Consegnato</option>
+                </select>
+            </div>
+            <div class="flex-1 min-w-[200px]">
+                <label class="block text-xs font-bold text-slate-400 uppercase mb-1">Slot Orario</label>
+                <select id="filterSlot" onchange="loadOrders()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 outline-none">
+                    <option value="">Tutti gli orari</option>
+                    <!-- Slots will be loaded here -->
+                </select>
+            </div>
+            <button onclick="loadOrders()" class="bg-slate-800 text-white p-3 rounded-xl hover:bg-slate-900 transition-all">
+                <i class="lucide-refresh-cw"></i>
+            </button>
+        </div>
+
+        <div id="adminOrders" class="space-y-4">
+            <!-- Admin orders will be loaded here -->
+        </div>
+    </main>
+
+    <!-- QR Modal -->
+    <div id="qrModal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-3xl p-8 max-w-xs w-full text-center">
+            <h3 class="text-xl font-bold mb-4">Codice Ordine</h3>
+            <img id="qrImage" class="w-full aspect-square mb-4" src="" alt="QR Code">
+            <p id="qrCodeText" class="text-2xl font-black text-orange-600 mb-6"></p>
+            <button onclick="closeQR()" class="w-full bg-slate-100 py-3 rounded-xl font-bold text-slate-600">Chiudi</button>
+        </div>
+    </div>
+
+    <script>
+        let socket;
+
+        function setupWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            socket = new WebSocket(`${protocol}//${window.location.host}`);
+
+            socket.onopen = () => {
+                document.getElementById('wsStatus').classList.replace('bg-red-500', 'bg-green-500');
+                socket.send(JSON.stringify({ type: 'register_admin' }));
+            };
+
+            socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'new_order') {
+                    playNotification();
+                    loadOrders();
+                }
+            };
+
+            socket.onclose = () => {
+                document.getElementById('wsStatus').classList.replace('bg-green-500', 'bg-red-500');
+                setTimeout(setupWebSocket, 5000);
+            };
+        }
+
+        function playNotification() {
+            // Simple visual notification since audio might be blocked
+            const toast = document.createElement('div');
+            toast.className = 'fixed top-20 right-4 bg-orange-500 text-white px-6 py-4 rounded-2xl shadow-2xl z-50 animate-bounce';
+            toast.innerText = '🔔 Nuovo Ordine Ricevuto!';
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 5000);
+        }
+
+        async function loadSlots() {
+            const res = await fetch('/api/products/slots');
+            const slots = await res.json();
+            const select = document.getElementById('filterSlot');
+            slots.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.id;
+                opt.innerText = s.display_time;
+                select.appendChild(opt);
+            });
+        }
+
+        async function loadOrders() {
+            const status = document.getElementById('filterStatus').value;
+            const slotId = document.getElementById('filterSlot').value;
+            
+            const url = new URL('/api/orders/admin/orders', window.location.origin);
+            if (status) url.searchParams.append('status', status);
+            if (slotId) url.searchParams.append('slotId', slotId);
+
+            const res = await fetch(url);
+            const orders = await res.json();
+            
+            const list = document.getElementById('adminOrders');
+            list.innerHTML = orders.map(o => `
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                    <div class="flex flex-col md:flex-row justify-between gap-4 mb-4">
+                        <div class="flex-1">
+                            <div class="flex items-center gap-3 mb-2">
+                                <span class="text-3xl font-black text-orange-600">${o.order_code}</span>
+                                <span class="px-3 py-1 bg-slate-100 rounded-full text-xs font-bold text-slate-500">${o.display_time}</span>
+                            </div>
+                            <p class="text-sm text-slate-600 font-medium">${o.email}</p>
+                        </div>
+                        
+                        <div class="flex items-center gap-2">
+                            <select onchange="updateStatus(${o.id}, this.value)" 
+                                class="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 font-bold text-sm outline-none focus:ring-2 focus:ring-orange-500">
+                                <option value="in_attesa" ${o.status === 'in_attesa' ? 'selected' : ''}>In Attesa</option>
+                                <option value="in_preparazione" ${o.status === 'in_preparazione' ? 'selected' : ''}>In Preparazione</option>
+                                <option value="pronto" ${o.status === 'pronto' ? 'selected' : ''}>Pronto</option>
+                                <option value="consegnato" ${o.status === 'consegnato' ? 'selected' : ''}>Consegnato</option>
+                            </select>
+                            <button onclick="showQR('${o.order_code}')" class="p-2 bg-slate-100 rounded-xl text-slate-600"><i class="lucide-qr-code"></i></button>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-50 rounded-xl p-4 space-y-2">
+                        ${o.items.map(item => `
+                            <div class="flex justify-between text-sm font-medium">
+                                <span>${item.quantity}x ${item.name}</span>
+                                <span class="text-slate-400">€ ${(item.price_at_order * item.quantity).toFixed(2)}</span>
+                            </div>
+                        `).join('')}
+                        <div class="pt-2 border-t flex justify-between font-bold text-slate-800">
+                            <span>Totale</span>
+                            <span>€ ${o.total_price.toFixed(2)}</span>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function updateStatus(id, status) {
+            await fetch(`/api/orders/admin/orders/${id}/status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status })
+            });
+            loadOrders();
+        }
+
+        async function showQR(code) {
+            const res = await fetch(`/api/qr/${code}`);
+            const data = await res.json();
+            document.getElementById('qrImage').src = data.url;
+            document.getElementById('qrCodeText').innerText = code;
+            document.getElementById('qrModal').classList.remove('hidden');
+        }
+
+        function closeQR() {
+            document.getElementById('qrModal').classList.add('hidden');
+        }
+
+        async function logout() {
+            if (confirm('Sei sicuro di voler uscire dal pannello admin?')) {
+                await fetch('/api/auth/logout', { method: 'POST' });
+                window.location.href = '/';
+            }
+        }
+
+        loadSlots();
+        loadOrders();
+        setupWebSocket();
+    </script>
+</body>
+</html>

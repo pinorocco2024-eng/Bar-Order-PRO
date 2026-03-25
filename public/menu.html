@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bar Galilei - Menu</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lucide-static@0.344.0/font/lucide.min.css">
+</head>
+<body class="bg-slate-50 pb-24">
+    <!-- Header -->
+    <header class="bg-white p-4 shadow-sm sticky top-0 z-10">
+        <div class="max-w-2xl mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold text-orange-600">Bar Galilei</h1>
+            <div class="flex gap-4">
+                <a href="/orders.html" class="p-2 text-slate-600"><i class="lucide-list"></i></a>
+                <button onclick="logout()" class="p-2 text-slate-600"><i class="lucide-log-out"></i></button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-2xl mx-auto p-4 space-y-6">
+        <!-- Time Slots -->
+        <section>
+            <h2 class="text-lg font-bold mb-3">Scegli l'orario</h2>
+            <div id="slotsGrid" class="grid grid-cols-2 gap-2">
+                <!-- Slots will be loaded here -->
+            </div>
+        </section>
+
+        <!-- Menu -->
+        <section>
+            <h2 class="text-lg font-bold mb-3">Il nostro Menu</h2>
+            <div id="productsGrid" class="space-y-3">
+                <!-- Products will be loaded here -->
+            </div>
+        </section>
+    </main>
+
+    <!-- Cart Bar -->
+    <div id="cartBar" class="fixed bottom-0 left-0 right-0 bg-white border-t p-4 shadow-2xl transform translate-y-full transition-transform duration-300">
+        <div class="max-w-2xl mx-auto flex justify-between items-center">
+            <div>
+                <p class="text-sm text-slate-500">Totale</p>
+                <p id="cartTotal" class="text-xl font-bold text-slate-800">€ 0.00</p>
+            </div>
+            <button onclick="checkout()" class="bg-orange-500 text-white px-8 py-3 rounded-xl font-bold shadow-lg shadow-orange-100 active:scale-95 transition-all">
+                Ordina Ora
+            </button>
+        </div>
+    </div>
+
+    <script>
+        let cart = [];
+        let selectedSlot = null;
+        let products = [];
+
+        async function loadData() {
+            const [prodRes, slotRes] = await Promise.all([
+                fetch('/api/products'),
+                fetch('/api/products/slots')
+            ]);
+            
+            products = await prodRes.json();
+            const slots = await slotRes.json();
+
+            renderProducts(products);
+            renderSlots(slots);
+        }
+
+        function renderProducts(prods) {
+            const grid = document.getElementById('productsGrid');
+            grid.innerHTML = prods.map(p => `
+                <div class="bg-white p-4 rounded-2xl shadow-sm flex justify-between items-center border border-slate-100">
+                    <div>
+                        <h3 class="font-bold text-slate-800">${p.name}</h3>
+                        <p class="text-orange-600 font-semibold">€ ${p.price.toFixed(2)}</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <button onclick="updateCart(${p.id}, -1)" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600">-</button>
+                        <span id="qty-${p.id}" class="font-bold w-4 text-center">0</span>
+                        <button onclick="updateCart(${p.id}, 1)" class="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-bold">+</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderSlots(slots) {
+            const grid = document.getElementById('slotsGrid');
+            grid.innerHTML = slots.map(s => `
+                <button onclick="selectSlot(${s.id})" id="slot-${s.id}" 
+                    class="p-3 rounded-xl border-2 border-slate-200 text-slate-600 font-medium transition-all hover:border-orange-200">
+                    ${s.display_time}
+                </button>
+            `).join('');
+        }
+
+        function selectSlot(id) {
+            if (selectedSlot) {
+                document.getElementById(`slot-${selectedSlot}`).classList.remove('border-orange-500', 'bg-orange-50', 'text-orange-600');
+            }
+            selectedSlot = id;
+            document.getElementById(`slot-${id}`).classList.add('border-orange-500', 'bg-orange-50', 'text-orange-600');
+            updateCartBar();
+        }
+
+        function updateCart(id, delta) {
+            const product = products.find(p => p.id === id);
+            const cartItem = cart.find(item => item.id === id);
+
+            if (cartItem) {
+                cartItem.quantity += delta;
+                if (cartItem.quantity <= 0) {
+                    cart = cart.filter(item => item.id !== id);
+                }
+            } else if (delta > 0) {
+                cart.push({ ...product, quantity: 1 });
+            }
+
+            const qtyEl = document.getElementById(`qty-${id}`);
+            const currentQty = cart.find(item => item.id === id)?.quantity || 0;
+            qtyEl.innerText = currentQty;
+
+            updateCartBar();
+        }
+
+        function updateCartBar() {
+            const bar = document.getElementById('cartBar');
+            const totalEl = document.getElementById('cartTotal');
+            
+            const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            totalEl.innerText = `€ ${total.toFixed(2)}`;
+
+            if (cart.length > 0 && selectedSlot) {
+                bar.classList.remove('translate-y-full');
+            } else {
+                bar.classList.add('translate-y-full');
+            }
+        }
+
+        async function checkout() {
+            if (!selectedSlot || cart.length === 0) return;
+
+            const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            
+            const res = await fetch('/api/orders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    slotId: selectedSlot,
+                    items: cart,
+                    totalPrice: total
+                })
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                alert(`Ordine inviato! Codice: ${data.orderCode}`);
+                window.location.href = '/orders.html';
+            } else {
+                alert(data.error);
+            }
+        }
+
+        async function logout() {
+            if (confirm('Sei sicuro di voler uscire?')) {
+                await fetch('/api/auth/logout', { method: 'POST' });
+                window.location.href = '/';
+            }
+        }
+
+        loadData();
+    </script>
+</body>
+</html>
